@@ -1,0 +1,26 @@
+"use client";
+
+import { Field, SelectField } from "@/components/onboarding/fields";
+
+const statusOptions = [
+  { value: "student", label: "Student" },
+  { value: "working_professional", label: "Working professional" },
+  { value: "fresher", label: "Recent graduate" },
+  { value: "career_switcher", label: "Changing careers" },
+  { value: "other", label: "Other" },
+];
+
+export function AboutYouStep() {
+  return (
+    <div className="grid gap-5 sm:grid-cols-2">
+      <div className="sm:col-span-2">
+        <Field name="full_name" label="Full name" autoComplete="name" placeholder="How should we address you?" maxLength={80} />
+      </div>
+      <Field name="country" label="Country" autoComplete="country-name" placeholder="e.g. Canada" maxLength={80} />
+      <Field name="city" label="City" autoComplete="address-level2" placeholder="e.g. Toronto" maxLength={80} />
+      <div className="sm:col-span-2">
+        <SelectField name="current_status" label="Which best describes you?" options={statusOptions} />
+      </div>
+    </div>
+  );
+}
