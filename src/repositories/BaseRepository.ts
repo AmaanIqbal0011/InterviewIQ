@@ -1,4 +1,8 @@
-import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
+import type {
+  PostgrestError,
+  SupabaseClient,
+  User as SupabaseUser,
+} from "@supabase/supabase-js";
 import { AppError } from "@/lib/errors/AppError";
 import { AuthError, mapSupabaseError } from "@/lib/errors/AuthError";
 import type { Database } from "@/types/database";
@@ -10,7 +14,7 @@ export abstract class BaseRepository {
     this.supabase = supabase;
   }
 
-  protected async verifyUserSession(userId: string): Promise<void> {
+  protected async verifyUserSession(userId: string): Promise<SupabaseUser> {
     const { data: { user }, error } = await this.supabase.auth.getUser();
     if (error) {
       throw mapSupabaseError(error);
@@ -18,12 +22,15 @@ export abstract class BaseRepository {
     if (!user || user.id !== userId) {
       throw new AuthError("unknown");
     }
+    return user;
   }
 
   protected mapDbError(error: PostgrestError): never {
     console.error("Database operation failed", {
-      code: error.code,
-      message: error.message,
+      code: error.code || "unknown",
+      message: error.message || "Supabase returned an error without a message.",
+      details: error.details || "not provided",
+      hint: error.hint || "not provided",
     });
     throw new AppError("database", { cause: error });
   }

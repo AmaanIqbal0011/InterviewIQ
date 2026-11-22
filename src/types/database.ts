@@ -49,7 +49,7 @@ export type Database = {
           level: string;
           institution: string;
           field_of_study: string | null;
-          start_year: number;
+          start_year: number | null;
           end_year: number | null;
           is_current: boolean;
           grade: string | null;
@@ -60,7 +60,7 @@ export type Database = {
           level: string;
           institution: string;
           field_of_study?: string | null;
-          start_year: number;
+          start_year: number | null;
           end_year?: number | null;
           is_current?: boolean;
           grade?: string | null;
@@ -73,7 +73,7 @@ export type Database = {
           level?: string;
           institution?: string;
           field_of_study?: string | null;
-          start_year?: number;
+          start_year?: number | null;
           end_year?: number | null;
           is_current?: boolean;
           grade?: string | null;
@@ -188,6 +188,7 @@ export type Database = {
           interview_type: string;
           difficulty: string;
           interview_language: string;
+          practice_goals: string[];
           additional_notes: string | null;
         };
         Insert: {
@@ -199,6 +200,7 @@ export type Database = {
           interview_type: string;
           difficulty: string;
           interview_language: string;
+          practice_goals?: string[];
           additional_notes?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -212,6 +214,7 @@ export type Database = {
           interview_type?: string;
           difficulty?: string;
           interview_language?: string;
+          practice_goals?: string[];
           additional_notes?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -315,6 +318,8 @@ export type Database = {
           question_feedback: Json;
           improvement_plan: Json;
           cv_insights: Json;
+          duration_seconds: number;
+          summary: string | null;
           created_at: string;
         };
         Insert: {
@@ -328,6 +333,8 @@ export type Database = {
           question_feedback: Json;
           improvement_plan: Json;
           cv_insights: Json;
+          duration_seconds?: number;
+          summary?: string | null;
           created_at?: string;
         };
         Update: {
@@ -341,6 +348,8 @@ export type Database = {
           question_feedback?: Json;
           improvement_plan?: Json;
           cv_insights?: Json;
+          duration_seconds?: number;
+          summary?: string | null;
           created_at?: string;
         };
         Relationships: [

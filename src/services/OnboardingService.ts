@@ -3,11 +3,9 @@ import type { Database } from "@/types/database";
 import { AppError } from "@/lib/errors/AppError";
 import {
   aboutYouSchema,
-  careerGoalsStepSchema,
+  careerTargetStepSchema,
   educationStepSchema,
-  languagesStepSchema,
-  skillsStepSchema,
-  workExperienceStepSchema,
+  interviewSetupStepSchema,
 } from "@/lib/validation/onboardingSchemas";
 import type { CareerGoal } from "@/models/CareerGoal";
 import type { EducationEntry } from "@/models/EducationEntry";
@@ -81,42 +79,53 @@ export class OnboardingService {
         break;
       }
       case 3: {
-        const parsed = workExperienceStepSchema.safeParse(data);
+        const parsed = careerTargetStepSchema.safeParse(data);
         if (!parsed.success) throw new AppError("invalid_input", { cause: parsed.error });
-        this.assertUniqueIds(parsed.data.work_experiences);
-        await this.workExperienceRepository.replaceForUser(
+        const existing = await this.careerGoalRepository.getByUserId(userId);
+        const targetCompanies = this.dedupeStrings(parsed.data.career_goal.target_companies);
+        const topSkills = this.dedupeStrings(parsed.data.top_skills).slice(0, 10);
+        await this.skillRepository.replaceForUser(
           userId,
-          parsed.data.work_experiences,
+          topSkills.map((name) => ({
+            name,
+            category: "technical",
+            level: "intermediate",
+          })),
         );
+        await this.careerGoalRepository.upsert(userId, {
+          target_role: parsed.data.career_goal.target_role,
+          target_industry: parsed.data.career_goal.target_industry,
+          experience_level: parsed.data.career_goal.experience_level,
+          target_companies: targetCompanies,
+          interview_type: existing?.interviewType ?? "mixed",
+          difficulty: existing?.difficulty ?? "medium",
+          interview_language: existing?.interviewLanguage || "English",
+          practice_goals: existing?.practiceGoals ?? [],
+          additional_notes: existing?.additionalNotes ?? null,
+        });
         break;
       }
       case 4: {
-        const parsed = skillsStepSchema.safeParse(data);
+        const parsed = interviewSetupStepSchema.safeParse(data);
         if (!parsed.success) throw new AppError("invalid_input", { cause: parsed.error });
-        this.assertUniqueIds(parsed.data.skills);
-        await this.skillRepository.replaceForUser(userId, parsed.data.skills);
-        break;
-      }
-      case 5: {
-        const parsed = languagesStepSchema.safeParse(data);
-        if (!parsed.success) throw new AppError("invalid_input", { cause: parsed.error });
-        this.assertUniqueIds(parsed.data.languages);
-        await this.languageRepository.replaceForUser(userId, parsed.data.languages);
-        break;
-      }
-      case 6: {
-        const parsed = careerGoalsStepSchema.safeParse(data);
-        if (!parsed.success) throw new AppError("invalid_input", { cause: parsed.error });
-        const selectedLanguages = (await this.languageRepository.listByUserId(userId))
-          .filter((language) => language.isInterviewLanguage);
-        if (
-          selectedLanguages.length !== 1 ||
-          selectedLanguages[0].language !== parsed.data.career_goal.interview_language
-        ) {
-          throw new AppError("invalid_input");
-        }
-        await this.careerGoalRepository.upsert(userId, parsed.data.career_goal);
-        nextStep = 7;
+        const existing = await this.careerGoalRepository.getByUserId(userId);
+        await this.languageRepository.replaceForUser(userId, [{
+          language: parsed.data.career_goal.interview_language,
+          proficiency: parsed.data.interview_language_proficiency,
+          is_interview_language: true,
+        }]);
+        await this.careerGoalRepository.upsert(userId, {
+          target_role: existing?.targetRole ?? "Not specified",
+          target_industry: existing?.targetIndustry ?? null,
+          experience_level: existing?.experienceLevel ?? "entry",
+          target_companies: existing?.targetCompanies ?? [],
+          interview_type: parsed.data.career_goal.interview_type,
+          difficulty: parsed.data.career_goal.difficulty,
+          interview_language: parsed.data.career_goal.interview_language,
+          practice_goals: parsed.data.career_goal.practice_goals,
+          additional_notes: parsed.data.career_goal.additional_notes,
+        });
+        nextStep = 4;
         break;
       }
       default:
@@ -130,13 +139,12 @@ export class OnboardingService {
     const progress = await this.getProgress(userId);
     if (
       !progress.profile.fullName.trim() ||
-      !progress.profile.country ||
-      !progress.profile.city ||
       !progress.profile.currentStatus ||
-      progress.education.length === 0 ||
-      progress.skills.length < 3 ||
+      progress.education.length !== 1 ||
       progress.languages.filter((language) => language.isInterviewLanguage).length !== 1 ||
       !progress.careerGoal ||
+      progress.careerGoal.practiceGoals.length < 1 ||
+      progress.careerGoal.practiceGoals.length > 3 ||
       progress.languages.find((language) => language.isInterviewLanguage)?.language !==
         progress.careerGoal.interviewLanguage
     ) {
@@ -150,5 +158,15 @@ export class OnboardingService {
     if (new Set(ids).size !== ids.length) {
       throw new AppError("invalid_input");
     }
+  }
+
+  private dedupeStrings(items: readonly string[]): string[] {
+    const seen = new Set<string>();
+    return items.filter((item) => {
+      const key = item.trim().toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 }

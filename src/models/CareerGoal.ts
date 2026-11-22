@@ -4,6 +4,15 @@ export const interviewTypes = ["technical", "behavioral", "mixed", "hr"] as cons
 export type InterviewType = (typeof interviewTypes)[number];
 export const interviewDifficulties = ["easy", "medium", "hard"] as const;
 export type Difficulty = (typeof interviewDifficulties)[number];
+export const practiceGoals = [
+  "confidence",
+  "communication",
+  "technical_answers",
+  "behavioral_answers",
+  "english_fluency",
+  "time_management",
+] as const;
+export type PracticeGoal = (typeof practiceGoals)[number];
 
 export interface CareerGoalProps {
   user_id: string;
@@ -14,6 +23,7 @@ export interface CareerGoalProps {
   interview_type: InterviewType;
   difficulty: Difficulty;
   interview_language: string;
+  practice_goals: PracticeGoal[];
   additional_notes: string | null;
   created_at: string;
   updated_at: string;
@@ -28,6 +38,7 @@ export class CareerGoal {
   readonly interviewType: InterviewType;
   readonly difficulty: Difficulty;
   readonly interviewLanguage: string;
+  readonly practiceGoals: PracticeGoal[];
   readonly additionalNotes: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -41,6 +52,7 @@ export class CareerGoal {
     this.interviewType = props.interview_type;
     this.difficulty = props.difficulty;
     this.interviewLanguage = props.interview_language;
+    this.practiceGoals = props.practice_goals;
     this.additionalNotes = props.additional_notes;
     this.createdAt = props.created_at;
     this.updatedAt = props.updated_at;

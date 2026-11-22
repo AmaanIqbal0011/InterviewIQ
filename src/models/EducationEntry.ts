@@ -7,7 +7,7 @@ export interface EducationEntryProps {
   level: EducationLevel;
   institution: string;
   field_of_study: string | null;
-  start_year: number;
+  start_year: number | null;
   end_year: number | null;
   is_current: boolean;
   grade: string | null;
@@ -21,7 +21,7 @@ export class EducationEntry {
   readonly level: EducationLevel;
   readonly institution: string;
   readonly fieldOfStudy: string | null;
-  readonly startYear: number;
+  readonly startYear: number | null;
   readonly endYear: number | null;
   readonly isCurrent: boolean;
   readonly grade: string | null;

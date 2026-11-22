@@ -2,12 +2,9 @@
 
 const STEPS = [
   "About you",
-  "Education",
-  "Experience",
-  "Skills",
-  "Languages",
-  "Goals",
-  "Review",
+  "Background",
+  "Target",
+  "Interview setup",
 ] as const;
 
 export function StepIndicator({ step }: { step: number }) {
@@ -33,7 +30,7 @@ export function StepIndicator({ step }: { step: number }) {
           style={{ width: `${Math.max(progress, 10)}%` }}
         />
       </div>
-      <ol className="mt-4 hidden grid-cols-7 gap-2 sm:grid" aria-hidden="true">
+      <ol className="mt-4 hidden grid-cols-4 gap-2 sm:grid" aria-hidden="true">
         {STEPS.map((title, index) => (
           <li key={title} className="space-y-1.5">
             <div className={`h-1 rounded-full ${index + 1 <= step ? "bg-accent/70" : "bg-border"}`} />

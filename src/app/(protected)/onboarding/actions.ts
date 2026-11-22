@@ -6,11 +6,9 @@ import { AuthError, mapSupabaseError } from "@/lib/errors/AuthError";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   aboutYouSchema,
-  careerGoalsStepSchema,
+  careerTargetStepSchema,
   educationStepSchema,
-  languagesStepSchema,
-  skillsStepSchema,
-  workExperienceStepSchema,
+  interviewSetupStepSchema,
 } from "@/lib/validation/onboardingSchemas";
 import { OnboardingService } from "@/services/OnboardingService";
 
@@ -66,27 +64,15 @@ export async function saveStepAction(
         break;
       }
       case 3: {
-        const parsed = workExperienceStepSchema.safeParse(rawData);
+        const parsed = careerTargetStepSchema.safeParse(rawData);
         if (!parsed.success) return invalidResult(parsed.error);
         await service.saveStep(user.id, 3, parsed.data);
         break;
       }
       case 4: {
-        const parsed = skillsStepSchema.safeParse(rawData);
+        const parsed = interviewSetupStepSchema.safeParse(rawData);
         if (!parsed.success) return invalidResult(parsed.error);
         await service.saveStep(user.id, 4, parsed.data);
-        break;
-      }
-      case 5: {
-        const parsed = languagesStepSchema.safeParse(rawData);
-        if (!parsed.success) return invalidResult(parsed.error);
-        await service.saveStep(user.id, 5, parsed.data);
-        break;
-      }
-      case 6: {
-        const parsed = careerGoalsStepSchema.safeParse(rawData);
-        if (!parsed.success) return invalidResult(parsed.error);
-        await service.saveStep(user.id, 6, parsed.data);
         break;
       }
       default:
@@ -107,7 +93,7 @@ export async function completeOnboardingAction(): Promise<OnboardingActionResult
       return { ok: false, message: authError.message };
     }
     await new OnboardingService(supabase).completeOnboarding(user.id);
-    return { ok: true, step: 7 };
+    return { ok: true, step: 4 };
   } catch (error) {
     return errorResult(error);
   }

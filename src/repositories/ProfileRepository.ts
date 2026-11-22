@@ -1,4 +1,5 @@
 import { AppError } from "@/lib/errors/AppError";
+import { resolveDisplayName } from "@/lib/displayName";
 import type { AboutYouValues } from "@/lib/validation/onboardingSchemas";
 import { Profile, type CurrentStatus } from "@/models/Profile";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -16,18 +17,31 @@ export class ProfileRepository extends BaseRepository implements IProfileReposit
   }
 
   async getByUserId(userId: string): Promise<Profile> {
-    await this.verifyUserSession(userId);
+    const user = await this.verifyUserSession(userId);
+    let data = await this.findByUserId(userId);
+
+    if (!data) {
+      const { error } = await this.supabase.from("profiles").insert({
+        id: userId,
+        full_name: resolveDisplayName(user.user_metadata, user.email).slice(0, 80),
+      });
+      if (error && error.code !== "23505") this.mapDbError(error);
+      data = await this.findByUserId(userId);
+    }
+
+    if (!data) throw new AppError("not_found");
+
+    return this.toModel(data);
+  }
+
+  private async findByUserId(userId: string) {
     const { data, error } = await this.supabase
       .from("profiles")
       .select("*")
       .eq("id", userId)
       .maybeSingle();
     if (error) this.mapDbError(error);
-    if (!data) throw new AppError("not_found");
-    return new Profile({
-      ...data,
-      current_status: data.current_status as CurrentStatus | null,
-    });
+    return data;
   }
 
   async updateAboutYou(userId: string, values: AboutYouValues): Promise<Profile> {
@@ -36,18 +50,13 @@ export class ProfileRepository extends BaseRepository implements IProfileReposit
       .from("profiles")
       .update({
         full_name: values.full_name,
-        country: values.country,
-        city: values.city,
         current_status: values.current_status,
       })
       .eq("id", userId)
       .select("*")
       .single();
     if (error) this.mapDbError(error);
-    return new Profile({
-      ...data,
-      current_status: data.current_status as CurrentStatus | null,
-    });
+    return this.toModel(data);
   }
 
   async updateProgress(userId: string, step: number): Promise<Profile> {
@@ -60,21 +69,22 @@ export class ProfileRepository extends BaseRepository implements IProfileReposit
       .select("*")
       .single();
     if (error) this.mapDbError(error);
-    return new Profile({
-      ...data,
-      current_status: data.current_status as CurrentStatus | null,
-    });
+    return this.toModel(data);
   }
 
   async complete(userId: string): Promise<Profile> {
     await this.verifyUserSession(userId);
     const { data, error } = await this.supabase
       .from("profiles")
-      .update({ onboarding_completed: true, onboarding_step: 7 })
+      .update({ onboarding_completed: true, onboarding_step: 4 })
       .eq("id", userId)
       .select("*")
       .single();
     if (error) this.mapDbError(error);
+    return this.toModel(data);
+  }
+
+  private toModel(data: Database["public"]["Tables"]["profiles"]["Row"]): Profile {
     return new Profile({
       ...data,
       current_status: data.current_status as CurrentStatus | null,

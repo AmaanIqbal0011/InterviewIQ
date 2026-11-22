@@ -16,8 +16,6 @@ export function AboutYouStep() {
       <div className="sm:col-span-2">
         <Field name="full_name" label="Full name" autoComplete="name" placeholder="How should we address you?" maxLength={80} />
       </div>
-      <Field name="country" label="Country" autoComplete="country-name" placeholder="e.g. Canada" maxLength={80} />
-      <Field name="city" label="City" autoComplete="address-level2" placeholder="e.g. Toronto" maxLength={80} />
       <div className="sm:col-span-2">
         <SelectField name="current_status" label="Which best describes you?" options={statusOptions} />
       </div>
