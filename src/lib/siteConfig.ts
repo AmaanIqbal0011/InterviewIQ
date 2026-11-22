@@ -38,7 +38,7 @@ export const siteConfig: SiteConfig = {
   },
   url: "https://interviewiq.example.com",
   description:
-    "Upload your resume and practice with a live AI avatar interviewer. Finish every session with a detailed performance report — scores, strengths, weak areas and improvement tips.",
+    "Upload your resume and practice with a live AI interviewer. Finish every session with a detailed performance report — scores, strengths, weak areas and improvement tips.",
   keywords: [
     "AI interview coach",
     "mock interview",

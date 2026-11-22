@@ -5,7 +5,7 @@ export interface ConversationMessageProps {
   readonly text: string;
 }
 
-/** One turn in the mock conversation shown in the avatar showcase. */
+/** One turn in the mock conversation shown in the live interview showcase. */
 export class ConversationMessage {
   readonly role: ConversationRole;
   readonly text: string;

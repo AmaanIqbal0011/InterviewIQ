@@ -1,4 +1,7 @@
 @import "tailwindcss";
+@source not "../../.agents";
+@source not "../../.continue";
+@source not "../../skills";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -186,6 +189,98 @@
 
 .float-slow {
   animation: float-y 7s ease-in-out infinite;
+}
+
+/* --- Voice interview stage ------------------------------------------------ */
+
+@keyframes voice-orb-breathe {
+  0%,
+  100% {
+    transform: scale(0.97);
+  }
+  50% {
+    transform: scale(1.03);
+  }
+}
+
+@keyframes voice-orb-speak {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+@keyframes voice-orb-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes voice-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes voice-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes voice-caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.voice-orb-breathe {
+  animation: voice-orb-breathe 4.5s ease-in-out infinite;
+}
+
+.voice-orb-speak {
+  animation: voice-orb-speak 1.6s ease-in-out infinite;
+}
+
+.voice-orb-spin {
+  animation: voice-orb-spin 3.2s linear infinite;
+}
+
+.voice-fade-in {
+  animation: voice-fade-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.voice-shimmer {
+  background-image: linear-gradient(
+    100deg,
+    transparent 20%,
+    color-mix(in oklab, var(--accent) 40%, transparent) 50%,
+    transparent 80%
+  );
+  background-size: 200% 100%;
+  animation: voice-shimmer 1.8s linear infinite;
+}
+
+.voice-caret {
+  animation: voice-caret-blink 1s step-end infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

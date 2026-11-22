@@ -12,7 +12,7 @@ const EYEBROW = "Live voice interviews · 24/7";
 const HEADLINE_LEAD = "Practice the interview.";
 const HEADLINE_HIGHLIGHT = "Walk in ready.";
 const BODY =
-  "Upload your resume, pick your target role, and go one-on-one with a live AI avatar interviewer that follows up on every answer — then get a report of exactly what to improve.";
+  "Upload your resume, pick your target role, and go one-on-one with a live AI interviewer that follows up on every answer — then get a report of exactly what to improve.";
 const POINTS: readonly string[] = [
   "Questions tailored to your actual resume",
   "Instant scores, strengths and weak areas",

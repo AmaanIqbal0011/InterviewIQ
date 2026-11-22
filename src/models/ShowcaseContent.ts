@@ -14,7 +14,7 @@ export interface ShowcaseContentProps {
   readonly cta: Action;
 }
 
-/** Content for the live avatar showcase section. */
+/** Content for the live interview showcase section. */
 export class ShowcaseContent {
   readonly eyebrow: string;
   readonly title: string;

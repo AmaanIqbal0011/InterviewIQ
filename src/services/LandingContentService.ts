@@ -48,7 +48,7 @@ export class LandingContentService {
       headline: "Practice the interview. Master the offer.",
       headlineHighlight: "Master the offer.",
       subheadline:
-        "Upload your resume, choose your target role, and go head-to-head with a live AI avatar interviewer that asks questions tailored to your experience. Finish with a detailed report of scores, strengths, and exactly what to improve.",
+        "Upload your resume, choose your target role, and go head-to-head with a live AI interviewer that asks questions tailored to your experience. Finish with a detailed report of scores, strengths, and exactly what to improve.",
       primaryAction: new Action({ label: "Start your free interview", href: routes.signup }),
       secondaryAction: new Action({ label: "See how it works", href: "#how-it-works" }),
       trustNote: "Free first interview · No credit card required",
@@ -92,7 +92,7 @@ export class LandingContentService {
       }),
       new Step({
         index: 3,
-        title: "Live AI avatar interview",
+        title: "Live AI interview",
         description:
           "Answer out loud to a lifelike AI interviewer that follows up, probes and adapts.",
         icon: "video",
@@ -108,9 +108,9 @@ export class LandingContentService {
 
     this.features = [
       new Feature({
-        title: "Live AI avatar interviewer",
+        title: "Live AI interviewer",
         description:
-          "A natural face, tone and body language make the pressure — and the practice — feel real.",
+          "Natural turn-taking and follow-ups make the pressure — and the practice — feel real.",
         icon: "bot",
         badge: "Flagship",
       }),
@@ -230,7 +230,7 @@ export class LandingContentService {
       new Faq({
         question: "Does it feel like a real interview?",
         answer:
-          "Yes. You speak out loud to a live AI avatar with natural turn-taking, follow-up questions and time pressure. Most candidates say the nerves feel surprisingly real by question three.",
+          "Yes. You speak out loud to a live AI interviewer with natural turn-taking, follow-up questions and time pressure. Most candidates say the nerves feel surprisingly real by question three.",
       }),
       new Faq({
         question: "Which roles and industries are supported?",
