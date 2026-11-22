@@ -3,6 +3,7 @@ import type {
   SpeechRecognitionInstance,
   SpeechRecognitionWindow,
   SpeechRecognizer,
+  VoiceLoopErrorReason,
 } from "./types";
 
 export const FALLBACK_LANGUAGE = "en-US";
@@ -27,6 +28,24 @@ export function getRecognitionErrorMessage(code: string): string {
   }
 }
 
+/**
+ * Maps a raw SpeechRecognition error code to a hard failure reason for the
+ * voice loop. Returns `null` for soft errors the loop should absorb (quiet
+ * `no-speech`/`aborted` gaps, transient `network` blips that the bounded
+ * restart already covers, and codes handled inside the recognizer).
+ */
+export function getRecognitionErrorReason(code?: string): VoiceLoopErrorReason | null {
+  switch (code) {
+    case "not-allowed":
+    case "service-not-allowed":
+      return "mic_permission";
+    case "audio-capture":
+      return "mic_not_found";
+    default:
+      return null;
+  }
+}
+
 export function findSpeechRecognitionConstructor(
   target: Window | undefined,
 ): SpeechRecognitionConstructor | null {
@@ -38,12 +57,13 @@ export function findSpeechRecognitionConstructor(
 export class WebSpeechRecognizer implements SpeechRecognizer {
   onInterimResult: ((text: string) => void) | null = null;
   onFinalResult: ((text: string) => void) | null = null;
-  onError: ((message: string) => void) | null = null;
+  onError: ((message: string, code?: string) => void) | null = null;
   onNotice: ((message: string) => void) | null = null;
   onEnd: ((shouldRestart?: boolean) => void) | null = null;
 
   private fallbackAttempted = false;
   private stopAfterEnd = false;
+  private stopped = false;
 
   constructor(
     private readonly recognition: SpeechRecognitionInstance,
@@ -79,10 +99,11 @@ export class WebSpeechRecognizer implements SpeechRecognizer {
         return;
       }
 
-      this.onError?.(getRecognitionErrorMessage(event.error));
+      this.onError?.(getRecognitionErrorMessage(event.error), event.error);
     };
     recognition.onend = () => {
-      const shouldRestart = !this.stopAfterEnd;
+      // Intentional stop()/abort() must never request a restart.
+      const shouldRestart = !this.stopped && !this.stopAfterEnd;
       this.stopAfterEnd = false;
       this.onEnd?.(shouldRestart);
     };
@@ -100,10 +121,17 @@ export class WebSpeechRecognizer implements SpeechRecognizer {
   }
 
   start(): void {
+    this.stopped = false;
     this.recognition.start();
   }
 
   stop(): void {
+    this.stopped = true;
     this.recognition.stop();
+  }
+
+  abort(): void {
+    this.stopped = true;
+    this.recognition.abort();
   }
 }

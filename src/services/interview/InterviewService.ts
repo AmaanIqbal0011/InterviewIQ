@@ -39,7 +39,7 @@ export class InterviewService {
       experience_level: this.toExperienceLevel(goal.experience_level),
       interview_type: this.toInterviewType(goal.interview_type),
       difficulty: this.toDifficulty(goal.difficulty),
-      question_count: "5",
+      duration_minutes: "5",
       interview_language: goal.interview_language.toLowerCase().includes("urdu")
         ? "urdu_hinglish"
         : "english",

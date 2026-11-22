@@ -1,34 +1,33 @@
 "use client";
 
 import { z } from "zod";
-import { Bot, Mic, MicOff, RotateCcw, Send, Volume2, VolumeX, X } from "lucide-react";
+import { Bot, Mic, MicOff, Send, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
 import { useRouter } from "next/navigation";
-import { AvatarRenderer } from "@/components/avatar/AvatarRenderer";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { AvatarController } from "@/lib/avatar/AvatarController";
-import { WebSpeechLipSync } from "@/lib/avatar/WebSpeechLipSync";
+import { VoiceStage } from "@/components/voice/VoiceStage";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { useVoiceInterview } from "@/lib/voice/useVoiceInterview";
-import type { InterviewType } from "@/lib/validation/interviewSchemas";
+import { useVoiceInterviewLoop } from "@/lib/voice/useVoiceInterviewLoop";
+import type { SubmitOutcome } from "@/lib/voice/VoiceInterviewController";
+import type { VoiceLoopActions } from "@/lib/voice/useVoiceInterviewLoop";
+import { findSpeechRecognitionConstructor } from "@/lib/voice/WebSpeechRecognizer";
+import { WRAP_UP_SECONDS, type InterviewType } from "@/lib/validation/interviewSchemas";
+import type { InterviewPhase } from "@/services/interview/InterviewTimer";
 
 const FALLBACK_NOTICE = "General question - personalization failed";
 const COMPLETION_NOTICE = "Interview complete. Preparing your report...";
 const MAX_ANSWER_LENGTH = 3000;
-const AVATAR_PREFERENCE_KEY = "interviewiq-avatar-enabled";
-const avatarPreferenceListeners = new Set<() => void>();
-let avatarPreferenceSnapshot: boolean | null = null;
-let avatarPreferenceWarningShown = false;
+/** Safety net: force the wrap-up if the closing line never reports back. */
+const CLOSING_SPEECH_TIMEOUT_MS = (text: string): number =>
+  Math.min(60_000, 6_000 + text.length * 100);
 
 const answerResponseSchema = z
   .object({
@@ -41,17 +40,31 @@ const answerResponseSchema = z
         topic: z.string().nullable(),
         fallback: z.boolean(),
         isFollowup: z.boolean().optional(),
+        isClosing: z.boolean().optional(),
+        move: z.string().optional(),
       })
       .nullable(),
+    remainingSeconds: z.number().optional(),
+    elapsedSeconds: z.number().optional(),
+    phase: z.enum(["OPENING", "MAIN", "WRAP_UP", "ENDED"]).optional(),
   })
   .superRefine((result, context) => {
-    if (result.completed !== (result.nextQuestion === null)) {
+    if (result.completed && result.nextQuestion?.isClosing !== true) {
       context.addIssue({
         code: "custom",
-        message: "Completion responses must not include a next question.",
+        message: "Completed responses must carry the closing line.",
+      });
+    }
+    if (!result.completed && result.nextQuestion === null) {
+      context.addIssue({
+        code: "custom",
+        message: "Active responses must include the interviewer's next line.",
       });
     }
   });
+
+type AnswerResponse = z.infer<typeof answerResponseSchema>;
+type ClosingPayload = NonNullable<AnswerResponse["nextQuestion"]>;
 
 type ChatMessage = {
   id: string;
@@ -67,9 +80,10 @@ type ChatUIProps = {
   interviewId: string;
   targetRole: string;
   interviewType: InterviewType;
-  questionCount: number;
+  durationSeconds: number;
+  initialRemainingSeconds: number;
+  initialPhase: InterviewPhase;
   speechLanguage: string;
-  interviewerName?: string;
 };
 
 const INTERVIEW_TYPE_LABELS: Record<InterviewType, string> = {
@@ -78,75 +92,53 @@ const INTERVIEW_TYPE_LABELS: Record<InterviewType, string> = {
   mixed: "Mixed",
 };
 
+const PHASE_META: Record<InterviewPhase, { label: string; className: string }> = {
+  OPENING: { label: "Opening", className: "border-accent/30 bg-accent/10 text-accent" },
+  MAIN: { label: "In conversation", className: "border-border bg-surface text-muted-foreground" },
+  WRAP_UP: { label: "Wrapping up", className: "border-warning/40 bg-warning/10 text-warning" },
+  ENDED: { label: "Complete", className: "border-success/40 bg-success/10 text-success" },
+};
+
+/** Loop states where yanking the session would cut the candidate off. */
+const VOICE_BUSY_STATES = new Set([
+  "hearing",
+  "silence_countdown",
+  "submitting",
+  "speaking",
+]);
+
+function formatClock(totalSeconds: number): string {
+  const total = Math.max(0, totalSeconds);
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
 function isFallbackEvaluation(value: unknown): boolean {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "fallback" in value &&
-    value.fallback === true
-  );
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.questionFallback === true || record.fallback === true;
+}
+
+function moveOf(value: unknown): string | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const move = (value as Record<string, unknown>).move;
+  return typeof move === "string" ? move : null;
 }
 
 function createMessageId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function warnAvatarPreference(error: unknown, action: "read" | "save"): void {
-  if (avatarPreferenceWarningShown) return;
-  avatarPreferenceWarningShown = true;
-  console.warn(`Could not ${action} the avatar display preference`, {
-    errorName: error instanceof Error ? error.name : "UnknownError",
-  });
-}
-
-function getAvatarPreferenceSnapshot(): boolean {
-  if (typeof window === "undefined") return true;
-  if (avatarPreferenceSnapshot !== null) return avatarPreferenceSnapshot;
-  try {
-    avatarPreferenceSnapshot = window.localStorage.getItem(AVATAR_PREFERENCE_KEY) !== "false";
-  } catch (error) {
-    warnAvatarPreference(error, "read");
-    avatarPreferenceSnapshot = true;
-  }
-  return avatarPreferenceSnapshot;
-}
-
-function getServerAvatarPreferenceSnapshot(): boolean {
-  return true;
-}
-
-function subscribeAvatarPreference(listener: () => void): () => void {
-  avatarPreferenceListeners.add(listener);
-  const onStorage = (event: StorageEvent): void => {
-    if (event.key !== AVATAR_PREFERENCE_KEY && event.key !== null) return;
-    avatarPreferenceSnapshot = event.newValue !== "false";
-    avatarPreferenceListeners.forEach((notify) => notify());
-  };
-  window.addEventListener("storage", onStorage);
-  return () => {
-    avatarPreferenceListeners.delete(listener);
-    window.removeEventListener("storage", onStorage);
-  };
-}
-
-function setAvatarPreference(enabled: boolean): void {
-  avatarPreferenceSnapshot = enabled;
-  try {
-    window.localStorage.setItem(AVATAR_PREFERENCE_KEY, String(enabled));
-  } catch (error) {
-    warnAvatarPreference(error, "save");
-  }
-  avatarPreferenceListeners.forEach((listener) => listener());
-}
-
-/** Interview chat UI - restores turns and requests each next question after an answer. */
+/** Interview chat UI — time-based, restores turns, asks one line at a time. */
 export default function ChatUI({
   interviewId,
   targetRole,
   interviewType,
-  questionCount,
+  durationSeconds,
+  initialRemainingSeconds,
+  initialPhase,
   speechLanguage,
-  interviewerName = "Alex",
 }: ChatUIProps) {
   const router = useRouter();
   const reportHref = `/interview/${encodeURIComponent(interviewId)}/report`;
@@ -159,16 +151,11 @@ export default function ChatUI({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errorAction, setErrorAction] = useState<"answer" | "end" | null>(null);
   const [voiceMode, setVoiceMode] = useState(false);
-  const [aiVoiceMuted, setAiVoiceMuted] = useState(false);
-  const [speechRate, setSpeechRate] = useState("1");
+  const [sttSupported, setSttSupported] = useState(true);
   const [lastQuestion, setLastQuestion] = useState("");
-  const avatarEnabled = useSyncExternalStore(
-    subscribeAvatarPreference,
-    getAvatarPreferenceSnapshot,
-    getServerAvatarPreferenceSnapshot,
-  );
+  const [remainingSeconds, setRemainingSeconds] = useState(initialRemainingSeconds);
+  const [serverPhase, setServerPhase] = useState<InterviewPhase>(initialPhase);
   const voiceModeRef = useRef(false);
-  const aiVoiceMutedRef = useRef(false);
   const answerInputRef = useRef("");
   const messagesRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -176,46 +163,108 @@ export default function ChatUI({
   const cancelEndRef = useRef<HTMLButtonElement>(null);
   const pendingAnswerId = useRef<string | null>(null);
   const wasSubmitting = useRef(false);
+  const submittingRef = useRef(false);
+  const completedRef = useRef(false);
+  const loopActionsRef = useRef<VoiceLoopActions | null>(null);
+  /**
+   * Deadline based on the server's remaining time, so the tick never drifts.
+   * Seeded on the first tick (effects may read the clock; render may not).
+   */
+  const deadlineRef = useRef<number | null>(null);
+  const endingRef = useRef(false);
+  const autoEndRef = useRef(false);
+  const closingSpeechRef = useRef(false);
+  const closingTimerRef = useRef<number | null>(null);
 
   const updateAnswerInput = useCallback((text: string): void => {
     answerInputRef.current = text;
     setInput(text);
   }, []);
-  const voice = useVoiceInterview(speechLanguage, updateAnswerInput);
-  const lipSync = useMemo(() => new WebSpeechLipSync(), []);
-  const avatarController = useMemo(
-    () =>
-      new AvatarController(
-        {
-          subscribeState: voice.subscribeVoiceState,
-          subscribeSpeechBoundary: voice.subscribeSpeechBoundary,
-        },
-        lipSync,
-      ),
-    [lipSync, voice.subscribeSpeechBoundary, voice.subscribeVoiceState],
+
+  /** Re-anchors the local countdown on the server's authoritative clock. */
+  const syncClock = useCallback((remaining: number): void => {
+    const safe = Math.max(0, remaining);
+    deadlineRef.current = Date.now() + safe * 1000;
+    setRemainingSeconds(safe);
+    // Time back on the clock means the buzzer can fire again later.
+    if (safe > 0) autoEndRef.current = false;
+  }, []);
+
+  const clearClosingTimer = useCallback((): void => {
+    if (closingTimerRef.current !== null) {
+      window.clearTimeout(closingTimerRef.current);
+      closingTimerRef.current = null;
+    }
+  }, []);
+
+  const markCompleted = useCallback((): void => {
+    clearClosingTimer();
+    closingSpeechRef.current = false;
+    completedRef.current = true;
+    loopActionsRef.current?.disable();
+    setVoiceMode(false);
+    voiceModeRef.current = false;
+    setCompleted(true);
+    setConfirmEnd(false);
+    setRemainingSeconds(0);
+    setServerPhase("ENDED");
+    setMessages((previous) =>
+      previous.some((message) => message.id === "completion")
+        ? previous
+        : [
+            ...previous,
+            {
+              id: "completion",
+              text: COMPLETION_NOTICE,
+              isUser: false,
+              isNotice: true,
+            },
+          ],
+    );
+  }, [clearClosingTimer]);
+
+  /**
+   * Shows the closing line and, in voice mode, arms the sequencing that lets
+   * the interviewer finish speaking before the session is torn down.
+   * Returns true when the caller should hand the line to the voice loop.
+   */
+  const presentClosingLine = useCallback(
+    (closing: ClosingPayload): boolean => {
+      syncClock(0);
+      setServerPhase("ENDED");
+      setLastQuestion(closing.questionText);
+      setMessages((previous) =>
+        previous.some((message) => message.id === "closing-line")
+          ? previous
+          : [
+              ...previous,
+              {
+                id: "closing-line",
+                text: closing.questionText,
+                isUser: false,
+                isQuestion: true,
+                isFollowup: closing.isFollowup ?? false,
+                isFallback: closing.fallback,
+              },
+            ],
+      );
+
+      if (!voiceModeRef.current) {
+        markCompleted();
+        return false;
+      }
+
+      closingSpeechRef.current = true;
+      clearClosingTimer();
+      closingTimerRef.current = window.setTimeout(() => {
+        closingTimerRef.current = null;
+        closingSpeechRef.current = false;
+        markCompleted();
+      }, CLOSING_SPEECH_TIMEOUT_MS(closing.questionText));
+      return true;
+    },
+    [clearClosingTimer, markCompleted, syncClock],
   );
-  const avatar = useSyncExternalStore(
-    avatarController.subscribe,
-    avatarController.getSnapshot,
-    avatarController.getServerSnapshot,
-  );
-
-  useEffect(() => {
-    avatarController.connect();
-    return () => avatarController.disconnect();
-  }, [avatarController]);
-
-  useEffect(() => {
-    avatarController.setWaitingForResponse(submitting && !completed);
-  }, [avatarController, completed, submitting]);
-
-  useEffect(() => {
-    avatarController.setEnabled(avatarEnabled);
-  }, [avatarController, avatarEnabled]);
-
-  const toggleAvatar = (): void => {
-    setAvatarPreference(!avatarEnabled);
-  };
 
   useEffect(() => {
     (async () => {
@@ -237,12 +286,13 @@ export default function ChatUI({
         const builtMessages: ChatMessage[] = [];
         for (const turn of data ?? []) {
           if (turn.question_text) {
+            const move = moveOf(turn.evaluation);
             builtMessages.push({
               id: `question-${turn.turn_index}`,
               text: turn.question_text,
               isUser: false,
               isQuestion: true,
-              isFollowup: turn.question_type === "followup",
+              isFollowup: move !== null ? move === "probe" : turn.question_type === "followup",
               isFallback: isFallbackEvaluation(turn.evaluation),
             });
           }
@@ -300,6 +350,21 @@ export default function ChatUI({
     return () => window.clearTimeout(timeout);
   }, [completed, reportHref, router]);
 
+  // Local countdown, re-anchored whenever the server reports its own clock.
+  useEffect(() => {
+    if (completed) return;
+    const tick = (): void => {
+      if (deadlineRef.current === null) {
+        deadlineRef.current = Date.now() + initialRemainingSeconds * 1000;
+      }
+      const left = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
+      setRemainingSeconds((previous) => (previous === left ? previous : left));
+    };
+    tick();
+    const interval = window.setInterval(tick, 500);
+    return () => window.clearInterval(interval);
+  }, [completed, initialRemainingSeconds]);
+
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
@@ -307,27 +372,17 @@ export default function ChatUI({
     textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
   }, [input]);
 
-  const markCompleted = (): void => {
-    voice.stop();
-    setCompleted(true);
-    setConfirmEnd(false);
-    setMessages((previous) =>
-      previous.some((message) => message.id === "completion")
-        ? previous
-        : [
-            ...previous,
-            {
-              id: "completion",
-              text: COMPLETION_NOTICE,
-              isUser: false,
-              isNotice: true,
-            },
-          ],
-    );
-  };
+  const applyResultClock = useCallback(
+    (result: AnswerResponse): void => {
+      if (typeof result.remainingSeconds === "number") syncClock(result.remainingSeconds);
+      if (result.phase) setServerPhase(result.phase);
+    },
+    [syncClock],
+  );
 
-  const endInterview = async (): Promise<void> => {
-    if (submitting || completed) return;
+  const endInterview = useCallback(async (): Promise<void> => {
+    if (submittingRef.current || completedRef.current || endingRef.current) return;
+    endingRef.current = true;
     setSubmitting(true);
     setErrorMessage(null);
     setErrorAction(null);
@@ -343,9 +398,15 @@ export default function ChatUI({
         throw new Error(apiError.success ? apiError.data.error : "We couldn't end this interview.");
       }
       const result = answerResponseSchema.parse(payload);
-      if (!result.completed) throw new Error("The interview could not be completed.");
-      markCompleted();
+      if (!result.completed || !result.nextQuestion) {
+        throw new Error("The interview could not be completed.");
+      }
+      setConfirmEnd(false);
+      applyResultClock(result);
+      const speakInVoice = presentClosingLine(result.nextQuestion);
+      if (speakInVoice) loopActionsRef.current?.speak(result.nextQuestion.questionText);
     } catch (error) {
+      endingRef.current = false;
       setConfirmEnd(false);
       setErrorMessage(
         error instanceof Error ? error.message : "We couldn't end this interview. Please try again.",
@@ -354,74 +415,170 @@ export default function ChatUI({
     } finally {
       setSubmitting(false);
     }
+  }, [applyResultClock, interviewId, presentClosingLine]);
+
+  /**
+   * The single submission path shared by the text Send button and the voice
+   * loop (auto-send, Send now, Retry). Resolves `ignored` for no-op calls and
+   * rejects on failure so each caller can surface its own error UI.
+   */
+  const submitAnswer = useCallback(
+    async (rawText: string): Promise<SubmitOutcome> => {
+      const answerText = rawText.trim();
+      if (
+        !answerText ||
+        !interviewId ||
+        submittingRef.current ||
+        completedRef.current ||
+        closingSpeechRef.current
+      ) {
+        return { status: "ignored" };
+      }
+      submittingRef.current = true;
+      const answerId = pendingAnswerId.current ?? createMessageId("answer");
+      pendingAnswerId.current = answerId;
+      setMessages((previous) => {
+        const hasPendingAnswer = previous.some((message) => message.id === answerId);
+        if (hasPendingAnswer) {
+          return previous.map((message) =>
+            message.id === answerId ? { ...message, text: answerText } : message,
+          );
+        }
+        return [...previous, { id: answerId, text: answerText, isUser: true }];
+      });
+      setSubmitting(true);
+      setErrorMessage(null);
+      setErrorAction(null);
+      try {
+        const response = await fetch(`/api/interview/${encodeURIComponent(interviewId)}/answer`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ interviewId, answer_text: answerText }),
+        });
+        const payload: unknown = await response.json();
+        if (!response.ok) {
+          const apiError = z.object({ error: z.string() }).safeParse(payload);
+          throw new Error(
+            apiError.success ? apiError.data.error : "We couldn't submit that answer.",
+          );
+        }
+
+        const result = answerResponseSchema.parse(payload);
+        pendingAnswerId.current = null;
+        updateAnswerInput("");
+        applyResultClock(result);
+
+        if (result.completed && result.nextQuestion) {
+          const speakInVoice = presentClosingLine(result.nextQuestion);
+          // The voice loop speaks the closing line itself from `nextQuestion`.
+          return speakInVoice
+            ? { status: "next", questionText: result.nextQuestion.questionText }
+            : { status: "completed" };
+        }
+
+        const nextQuestion = result.nextQuestion;
+        if (nextQuestion) {
+          setLastQuestion(nextQuestion.questionText);
+          setMessages((previous) => [
+            ...previous,
+            {
+              id: createMessageId("question"),
+              text: nextQuestion.questionText,
+              isUser: false,
+              isQuestion: true,
+              isFollowup: nextQuestion.isFollowup ?? false,
+              isFallback: nextQuestion.fallback,
+            },
+          ]);
+          return { status: "next", questionText: nextQuestion.questionText };
+        }
+        markCompleted();
+        return { status: "completed" };
+      } finally {
+        submittingRef.current = false;
+        setSubmitting(false);
+      }
+    },
+    [applyResultClock, interviewId, markCompleted, presentClosingLine, updateAnswerInput],
+  );
+
+  const voiceLoop = useVoiceInterviewLoop({ language: speechLanguage, submit: submitAnswer });
+  useEffect(() => {
+    loopActionsRef.current = voiceLoop.actions;
+  }, [voiceLoop.actions]);
+
+  // The buzzer: ends the session once nothing is in flight, never mid-answer.
+  // A half-typed answer is submitted first so it is evaluated and kept.
+  const voiceState = voiceLoop.snapshot.state;
+  const voiceBusy = voiceMode && VOICE_BUSY_STATES.has(voiceState);
+  useEffect(() => {
+    if (completed || loadingInitial) return;
+    if (remainingSeconds > 0 || submitting || voiceBusy) return;
+    if (closingSpeechRef.current || autoEndRef.current) return;
+    autoEndRef.current = true;
+    const draft = answerInputRef.current.trim();
+    if (draft !== "" && !voiceModeRef.current) {
+      void submitAnswer(draft).catch((error: unknown) => {
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "We couldn't submit that answer. Please try again.",
+        );
+        setErrorAction("answer");
+      });
+      return;
+    }
+    void endInterview();
+  }, [
+    completed,
+    endInterview,
+    loadingInitial,
+    remainingSeconds,
+    submitAnswer,
+    submitting,
+    voiceBusy,
+  ]);
+
+  // Once the closing line has been handed to the voice loop, wrap up as soon
+  // as it stops being spoken (with a timeout in case TTS never reports back).
+  // Deferred a tick so the final render lands before the session is torn down.
+  useEffect(() => {
+    if (!closingSpeechRef.current) return;
+    if (voiceState === "submitting" || voiceState === "speaking") return;
+    const timeout = window.setTimeout(() => {
+      if (!closingSpeechRef.current) return;
+      clearClosingTimer();
+      closingSpeechRef.current = false;
+      markCompleted();
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [clearClosingTimer, markCompleted, voiceState]);
+
+  const toggleVoiceMode = (): void => {
+    const enabled = !voiceModeRef.current;
+    voiceModeRef.current = enabled;
+    setVoiceMode(enabled);
+    if (enabled) {
+      setSttSupported(findSpeechRecognitionConstructor(window) !== null);
+      voiceLoop.actions.enable({ question: lastQuestion, seedTranscript: input });
+      return;
+    }
+    const transcript = voiceLoop.snapshot.transcript;
+    if (transcript.trim() !== "") {
+      updateAnswerInput(transcript.slice(0, MAX_ANSWER_LENGTH));
+    }
+    voiceLoop.actions.disable();
   };
 
   const sendMessage = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
-    const answerText = answerInputRef.current.trim();
-    if (!answerText || !interviewId || submitting || completed) return;
-
-    const answerId = pendingAnswerId.current ?? createMessageId("answer");
-    pendingAnswerId.current = answerId;
-    setMessages((previous) => {
-      const hasPendingAnswer = previous.some((message) => message.id === answerId);
-      if (hasPendingAnswer) {
-        return previous.map((message) =>
-          message.id === answerId ? { ...message, text: answerText } : message,
-        );
-      }
-      return [...previous, { id: answerId, text: answerText, isUser: true }];
-    });
-    setSubmitting(true);
-    if (voiceModeRef.current) voice.beginProcessing();
-    setErrorMessage(null);
-    setErrorAction(null);
     try {
-      const response = await fetch(`/api/interview/${encodeURIComponent(interviewId)}/answer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ interviewId, answer_text: answerText }),
-      });
-      const payload: unknown = await response.json();
-      if (!response.ok) {
-        const apiError = z.object({ error: z.string() }).safeParse(payload);
-        throw new Error(apiError.success ? apiError.data.error : "We couldn't submit that answer.");
-      }
-
-      const result = answerResponseSchema.parse(payload);
-      pendingAnswerId.current = null;
-      updateAnswerInput("");
-      const nextQuestion = result.nextQuestion;
-      if (nextQuestion) {
-        setLastQuestion(nextQuestion.questionText);
-        voice.finishProcessing();
-        setMessages((previous) => [
-          ...previous,
-          {
-            id: createMessageId("question"),
-            text: nextQuestion.questionText,
-            isUser: false,
-            isQuestion: true,
-            isFollowup: nextQuestion.isFollowup ?? false,
-            isFallback: nextQuestion.fallback,
-          },
-        ]);
-        if (voiceModeRef.current && !aiVoiceMutedRef.current) {
-          voice.speak(nextQuestion.questionText);
-        }
-      } else {
-        markCompleted();
-      }
+      await submitAnswer(answerInputRef.current);
     } catch (error) {
-      voice.finishProcessing();
       setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "We couldn't submit that answer. Please try again.",
+        error instanceof Error ? error.message : "We couldn't submit that answer. Please try again.",
       );
       setErrorAction("answer");
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -432,11 +589,18 @@ export default function ChatUI({
     }
   };
 
-  const mainQuestionCount = messages.filter(
-    (message) => message.isQuestion && !message.isFollowup,
-  ).length;
-  const currentQuestion = Math.min(questionCount, Math.max(1, mainQuestionCount));
-  const progress = (currentQuestion / questionCount) * 100;
+  const displayPhase: InterviewPhase = completed
+    ? "ENDED"
+    : remainingSeconds <= 0
+      ? "ENDED"
+      : remainingSeconds <= WRAP_UP_SECONDS
+        ? "WRAP_UP"
+        : serverPhase === "ENDED"
+          ? "MAIN"
+          : serverPhase;
+  const elapsedSeconds = Math.max(0, durationSeconds - remainingSeconds);
+  const progress = durationSeconds > 0 ? (elapsedSeconds / durationSeconds) * 100 : 0;
+  const phaseMeta = PHASE_META[displayPhase];
 
   return (
     <main className="h-[100dvh] min-h-0 overflow-hidden bg-background px-3 py-3 sm:px-6 sm:py-5">
@@ -466,20 +630,52 @@ export default function ChatUI({
             </button>
           </div>
 
-          <div className="mt-4 flex items-center justify-between gap-3">
-            <p className="text-xs font-medium text-muted-foreground">
-              Question {currentQuestion} of {questionCount}
-            </p>
-            <span className="text-[11px] text-muted-foreground">
-              {completed ? "Complete" : "In progress"}
-            </span>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${phaseMeta.className}`}
+              >
+                <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />
+                {phaseMeta.label}
+              </span>
+              <span
+                className={`text-xs font-semibold tabular-nums ${
+                  remainingSeconds <= WRAP_UP_SECONDS && !completed ? "text-warning" : "text-foreground"
+                }`}
+              >
+                {formatClock(remainingSeconds)} left
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                disabled={submitting || completed || loadingInitial}
+                aria-pressed={voiceMode}
+                onClick={toggleVoiceMode}
+                className={`inline-flex h-9 items-center gap-2 rounded-full border px-3 text-xs font-semibold transition-colors disabled:pointer-events-none disabled:opacity-60 ${
+                  voiceMode
+                    ? "border-accent/40 bg-accent/15 text-foreground"
+                    : "border-border bg-surface text-muted-foreground hover:bg-surface-strong"
+                }`}
+              >
+                {voiceMode ? (
+                  <Mic aria-hidden="true" className="h-4 w-4" />
+                ) : (
+                  <MicOff aria-hidden="true" className="h-4 w-4" />
+                )}
+                Voice mode
+              </button>
+              <span className="text-[11px] text-muted-foreground">
+                {completed ? "Complete" : "In progress"}
+              </span>
+            </div>
           </div>
           <div
             role="progressbar"
-            aria-label="Interview progress"
+            aria-label="Interview time elapsed"
             aria-valuemin={0}
-            aria-valuemax={questionCount}
-            aria-valuenow={currentQuestion}
+            aria-valuemax={durationSeconds}
+            aria-valuenow={elapsedSeconds}
             className="mt-2 h-1 overflow-hidden rounded-full bg-surface-strong"
           >
             <div
@@ -488,136 +684,29 @@ export default function ChatUI({
             />
           </div>
 
-          {(voice.recognitionSupported || voice.synthesisSupported) && (
-            <section
-              aria-label="Voice controls"
-              className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-surface-strong px-3 py-2.5"
-            >
-              <button
-                type="button"
-                aria-pressed={voiceMode}
-                onClick={() => {
-                  const enabled = !voiceModeRef.current;
-                  voiceModeRef.current = enabled;
-                  setVoiceMode(enabled);
-                  if (!enabled) voice.stop();
-                  else if (lastQuestion && !aiVoiceMutedRef.current) voice.speak(lastQuestion);
-                }}
-                className={`inline-flex h-9 items-center gap-2 rounded-full border px-3 text-xs font-semibold transition-colors ${
-                  voiceMode
-                    ? "border-accent/40 bg-accent/15 text-foreground"
-                    : "border-border bg-surface text-muted-foreground hover:bg-surface-strong"
-                }`}
-              >
-                {voiceMode ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
-                Voice mode
-              </button>
-
-              {voiceMode && (
-                <div className="flex flex-wrap items-center gap-2">
-                  {voice.state === "speaking" && (
-                    <span role="status" className="text-xs font-medium text-accent">
-                      AI is speaking...
-                    </span>
-                  )}
-                  {voice.synthesisSupported && (
-                    <>
-                      <button
-                        type="button"
-                        aria-pressed={aiVoiceMuted}
-                        onClick={() => {
-                          const muted = !aiVoiceMutedRef.current;
-                          aiVoiceMutedRef.current = muted;
-                          setAiVoiceMuted(muted);
-                          if (muted) voice.cancelSpeech();
-                        }}
-                        className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border px-3 text-xs text-foreground hover:bg-surface"
-                      >
-                        {aiVoiceMuted ? (
-                          <VolumeX aria-hidden="true" className="h-4 w-4" />
-                        ) : (
-                          <Volume2 aria-hidden="true" className="h-4 w-4" />
-                        )}
-                        {aiVoiceMuted ? "AI voice muted" : "Mute AI voice"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!lastQuestion || aiVoiceMuted}
-                        onClick={() => voice.speak(lastQuestion)}
-                        className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border px-3 text-xs text-foreground hover:bg-surface disabled:pointer-events-none disabled:opacity-50"
-                      >
-                        <RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />
-                        Replay last question
-                      </button>
-                      <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                        Speed
-                        <select
-                          aria-label="Speaking speed"
-                          value={speechRate}
-                          onChange={(event) => {
-                            setSpeechRate(event.target.value);
-                            voice.setRate(Number(event.target.value));
-                          }}
-                          className="h-9 rounded-full border border-border bg-background px-2 text-xs text-foreground"
-                        >
-                          <option value="0.8">0.8x</option>
-                          <option value="1">1x</option>
-                          <option value="1.2">1.2x</option>
-                        </select>
-                      </label>
-                    </>
-                  )}
-                </div>
-              )}
-              {voiceMode && (
-                <p className="basis-full text-[11px] text-muted-foreground">
-                  Recognition accuracy varies by language.
-                </p>
-              )}
-              {voice.recognitionSupported && (
-                <p className="basis-full text-[11px] text-muted-foreground">
-                  In Chrome, voice recognition is processed by the browser&apos;s speech service. Your
-                  text answer is what gets saved.
-                </p>
-              )}
-              {voice.notice && (
-                <p role="status" className="basis-full text-[11px] text-muted-foreground">
-                  {voice.notice}
-                </p>
-              )}
-            </section>
-          )}
-          {!voice.recognitionSupported && (
+          {!sttSupported && (
             <p className="mt-2 text-[11px] text-muted-foreground">
-              Voice input works best in Chrome or Edge. You can still type.
+              Voice input works best in Chrome, Edge or Safari. You can still type.
             </p>
           )}
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3 pt-3 lg:flex-row lg:gap-6 lg:pt-5">
-          <aside className="flex shrink-0 items-center justify-between gap-3 border-b border-border/70 pb-3 lg:w-64 lg:flex-col lg:justify-start lg:gap-5 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-5">
-            {avatarEnabled ? (
-              <AvatarRenderer
-                state={avatar.state}
-                mouthOpenness={avatar.mouthOpenness}
-                name={interviewerName}
-                caption={lastQuestion}
-              />
-            ) : (
-              <p className="text-xs text-muted-foreground" role="status">
-                Avatar hidden
-              </p>
-            )}
-            <button
-              type="button"
-              aria-pressed={avatarEnabled}
-              onClick={toggleAvatar}
-              className="inline-flex h-8 shrink-0 items-center rounded-full border border-border bg-surface px-3 text-[11px] font-medium text-muted-foreground transition-colors hover:border-accent/40 hover:text-foreground"
-            >
-              Avatar {avatarEnabled ? "on" : "off"}
-            </button>
-          </aside>
-
+        {voiceMode && !completed && !loadingInitial ? (
+          <VoiceStage
+            questionText={
+              lastQuestion || "Your first question will appear here as soon as it is ready."
+            }
+            remainingSeconds={remainingSeconds}
+            history={messages}
+            snapshot={voiceLoop.snapshot}
+            settings={voiceLoop.settings}
+            onSettingsChange={voiceLoop.patchSettings}
+            actions={voiceLoop.actions}
+            shortcutsActive={!confirmEnd}
+            onExit={toggleVoiceMode}
+          />
+        ) : (
+        <div className="flex min-h-0 flex-1 flex-col pt-3 lg:pt-5">
           <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <div
               ref={messagesRef}
@@ -745,7 +834,6 @@ export default function ChatUI({
                     onChange={(event) => {
                       const text = event.target.value.slice(0, MAX_ANSWER_LENGTH);
                       updateAnswerInput(text);
-                      voice.updateDraft(text);
                     }}
                     onKeyDown={handleKeyDown}
                     placeholder="Write your answer… (Enter to send, Shift+Enter for a new line)"
@@ -755,34 +843,6 @@ export default function ChatUI({
                     aria-label="Your answer"
                     className="max-h-40 min-h-11 min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-3 py-3 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-60"
                   />
-                  {voiceMode && voice.recognitionSupported && (
-                    <button
-                      type="button"
-                      disabled={submitting || loadingInitial}
-                      aria-label={voice.state === "listening" ? "Stop and send answer" : "Start recording answer"}
-                      onClick={() => {
-                        if (voice.state === "listening") {
-                          updateAnswerInput(voice.transcript);
-                          voice.stopListening();
-                          formRef.current?.requestSubmit();
-                        } else {
-                          voice.startListening(answerInputRef.current);
-                        }
-                      }}
-                      className={`inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-white transition-colors disabled:pointer-events-none disabled:opacity-60 ${
-                        voice.state === "listening"
-                          ? "animate-pulse bg-red-600 shadow-[0_0_0_6px_rgba(220,38,38,0.15)]"
-                          : "bg-accent hover:brightness-110"
-                      }`}
-                      title={voice.state === "listening" ? "Stop and send" : "Start recording"}
-                    >
-                      {voice.state === "listening" ? (
-                        <Send aria-hidden="true" className="h-5 w-5" />
-                      ) : (
-                        <Mic aria-hidden="true" className="h-5 w-5" />
-                      )}
-                    </button>
-                  )}
                   <Button
                     type="submit"
                     size="sm"
@@ -804,6 +864,7 @@ export default function ChatUI({
             )}
           </section>
         </div>
+        )}
       </Card>
 
       {confirmEnd && (

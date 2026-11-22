@@ -6,7 +6,7 @@ import type { LLMClient } from "@/services/resume/llm/LLMClient";
 
 const mockContext = candidateContextSchema.parse({
   candidate: { full_name: "John Doe", country: null, city: null, current_status: "Software Engineer" },
-  goals: { target_role: "Software Engineer", target_industry: null, experience_level: "mid", target_companies: [], interview_type: "technical", difficulty: "medium", interview_language: "english", additional_notes: null },
+  goals: { target_role: "Software Engineer", target_industry: null, experience_level: "mid", target_companies: [], interview_type: "technical", difficulty: "medium", interview_language: "english", practice_goals: [], additional_notes: null },
   onboarding: { education: [], work_experience: [], skills: [{ name: "JavaScript", category: "technical", level: "advanced" }, { name: "TypeScript", category: "technical", level: "advanced" }], languages: [{ language: "English", proficiency: "native", is_interview_language: true }] },
   resume: { summary: "Senior frontend developer.", skills: { technical: ["JavaScript", "TypeScript"], soft: ["Communication"] }, experience: [], projects: [], education: [], certifications: [], languages: [] },
   has_completed_resume: true,
@@ -17,7 +17,7 @@ const mockConfig = interviewConfigSchema.parse({
   experience_level: "mid",
   interview_type: "technical",
   difficulty: "medium",
-  question_count: "5",
+  duration_minutes: "5",
   interview_language: "english",
   focus_topics: [],
   use_resume: true,

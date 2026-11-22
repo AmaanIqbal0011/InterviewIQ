@@ -151,6 +151,7 @@ export class AnswerEvaluator {
     const candidateName = ctx?.candidate?.full_name ?? "the candidate";
     const targetRole = this.interviewConfig?.target_role ?? "the role";
     const difficulty = this.interviewConfig?.difficulty ?? "medium";
+    const practiceGoals = ctx?.goals.practice_goals ?? [];
 
     // Pull a few real data points for personalization
     const projects: string[] = [];
@@ -181,6 +182,7 @@ export class AnswerEvaluator {
 
 Candidate: ${candidateName}
 ${personalization.join(" ")}
+Practice goals: ${practiceGoals.join(", ") || "not specified"}
 
 Answer: "${answer}"
 
@@ -193,8 +195,8 @@ Evaluate the answer on these 0-10 scales:
 - clarity: how clear and well-structured the answer was
 
 Also provide:
-- strengths: array of the candidate's strong points mentioned in the answer (max 3)
-- gaps: array of what was missing or could be improved (max 3)
+- strengths: array of the candidate's strong points mentioned in the answer, highlighting relevant practice goals (max 3)
+- gaps: array of what was missing or could be improved, highlighting relevant practice goals (max 3)
 - suggestedFollowUp: a very brief suggestion for a follow-up question (max 1 sentence), or null if the answer is solid
 
 Return STRICTLY valid JSON with these exact field names only: score, relevance, depth, clarity, strengths, gaps, suggestedFollowUp. No surrounding text, no markdown, no explanations.`;

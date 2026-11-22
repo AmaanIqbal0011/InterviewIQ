@@ -6,9 +6,11 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { createInterviewAction } from "@/app/(protected)/interview/actions";
+import { durationValues, type InterviewDuration } from "@/lib/validation/interviewSchemas";
 
 export default function NewInterviewForm() {
   const [user, setUser] = useState<boolean>(false);
+  const [duration, setDuration] = useState<InterviewDuration>("5");
 
   // Check auth state
   useEffect(() => {
@@ -42,7 +44,7 @@ export default function NewInterviewForm() {
       experience_level: formData.get("experience_level") as string || "mid",
       interview_type: formData.get("interview_type") as string || "technical",
       difficulty: (formData.get("difficulty") as string) || "medium",
-      question_count: formData.get("question_count") as string || "5",
+      duration_minutes: duration,
       interview_language: formData.get("interview_language") as string || "english",
       use_resume: formData.get("use_resume") ? formData.get("use_resume") === "on" : false,
       focus_topics: focusTopics,
@@ -163,17 +165,37 @@ export default function NewInterviewForm() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-foreground mb-1">
-                Number of Questions
-              </label>
-              <select
-                name="question_count"
-                className="w-full rounded border border-border p-2 text-sm"
+              <span className="block text-sm font-medium text-foreground mb-2">
+                Interview length
+              </span>
+              <div
+                role="radiogroup"
+                aria-label="Interview length"
+                className="grid grid-cols-4 gap-2 rounded-2xl border border-border bg-surface-strong p-1.5"
               >
-                <option value="5">5</option>
-                <option value="8">8</option>
-                <option value="10">10</option>
-              </select>
+                {durationValues.map((value) => {
+                  const selected = duration === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => setDuration(value)}
+                      className={`rounded-xl px-2 py-2.5 text-center text-sm font-semibold transition-all ${
+                        selected
+                          ? "bg-gradient-to-br from-accent via-accent-2 to-accent-3 text-white shadow-[0_8px_20px_-12px_var(--glow)]"
+                          : "text-muted-foreground hover:bg-surface hover:text-foreground"
+                      }`}
+                    >
+                      {value} min
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                The interviewer keeps to the clock — you&apos;ll wrap up in the last 45 seconds.
+              </p>
             </div>
 
             <div>
@@ -226,9 +248,9 @@ export default function NewInterviewForm() {
             What your interviewer knows about you
           </h3>
           <p className="text-sm text-muted-foreground">
-            Your interviewer will know your onboarding answers (full name, country,
-            city, current status, education, work experience, skills, languages, and
-            career goals). If you have a completed resume, they will also see a summary
+            Your interviewer will know your onboarding answers (full name, current status,
+            education, skills, interview language, practice goals, and career goals).
+            If you have a completed resume, they will also see a summary
             of your resume including skills, experience, education, projects, and
             certifications.
           </p>

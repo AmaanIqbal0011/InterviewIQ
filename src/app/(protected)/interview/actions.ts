@@ -2,10 +2,10 @@
 
 import { AppError } from "@/lib/errors/AppError";
 import { AuthError, mapSupabaseError } from "@/lib/errors/AuthError";
+import { InterviewError } from "@/lib/errors/InterviewError";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createInterviewService } from "@/services/interview/createInterviewService";
-import { QuestionGenerator } from "@/lib/question_generator";
-import { candidateContextSchema } from "@/lib/validation/candidateContextSchemas";
+import { InterviewSession } from "@/services/interview/InterviewSession";
 import { createLLMClientFromEnv } from "@/services/resume/llm/createLLMClient";
 import type { LLMClient } from "@/services/resume/llm/LLMClient";
 
@@ -27,13 +27,14 @@ function invalidResult(error: { issues: ReadonlyArray<{ path: PropertyKey[]; mes
 }
 
 /**
- * Creates an interview row, generates the first question via QuestionGenerator,
- * and saves it as turn 0 in interview_turns.
+ * Creates the interview row and lets the session open it with a greeting and
+ * the first question (turn 0), then marks it in progress.
  * Never redirects itself — the caller decides where to go.
  */
 export async function createInterviewAction(
   rawConfig: unknown,
 ): Promise<CreateInterviewActionResult> {
+  let interviewId: string | null = null;
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user }, error } = await supabase.auth.getUser();
@@ -48,97 +49,68 @@ export async function createInterviewAction(
     if (!parsed.success) return invalidResult(parsed.error);
 
     const interview = await service.createInterview(user.id, parsed.data);
-    const interviewId = interview.id;
+    interviewId = interview.id;
 
-    // --- GENERATE FIRST QUESTION ---
     let llmClient: LLMClient;
     try {
       llmClient = createLLMClientFromEnv();
     } catch (llmError) {
-      // If LLM client can't be created (missing API key/provider), throw a typed error
       console.error("LLM client configuration error", { error: llmError });
+      await rollbackInterview(supabase, interview.id);
       return {
         ok: false,
-        message:
-          "Interview service is not configured. Please contact the administrator.",
+        message: "Interview service is not configured. Please contact the administrator.",
       };
     }
 
     try {
-      // Build the CandidateContext from the interview row's snapshot
-      const { data: turnData } = await supabase
-        .from("interviews")
-        .select("context_snapshot")
-        .eq("id", interviewId)
-        .single();
-
-      if (!turnData?.context_snapshot) {
-        throw new Error("No context snapshot found for newly created interview");
-      }
-
-      const ctx = candidateContextSchema.parse(turnData.context_snapshot);
-      const questionGenerator = new QuestionGenerator(
-        llmClient,
-        ctx,
-        parsed.data,
-      );
-
-      const { questionText, topic, fallback } = await questionGenerator.generateMainQuestion([], []);
-
-      // Save the first question as turn 0 in interview_turns
-      const { error: turnError } = await supabase
-        .from("interview_turns")
-        .insert({
-          interview_id: interviewId,
-          turn_index: 0,
-          question_type: "main",
-          question_text: questionText,
-          topic,
-          answer_text: null,
-          evaluation: { fallback },
-        });
-
-      if (turnError) {
-        console.error("Failed to save first question turn", { error: turnError });
-        // Roll back the interview if saving the turn fails
-        await supabase.from("interviews").delete().eq("id", interviewId);
-        return {
-          ok: false,
-          message:
-            "Failed to save the first question. Please try again.",
-        };
-      }
-
-      // Mark the interview as in_progress now that we have the first question
-      await supabase
-        .from("interviews")
-        .update({ status: "in_progress", started_at: new Date().toISOString() })
-        .eq("id", interviewId)
-        .eq("user_id", user.id);
-
-      return { ok: true, interviewId };
-    } catch (genError) {
-      // If first-question generation fails, roll back the interview
-      console.error("First question generation failed", { error: genError, interviewId });
-      try {
-        await supabase.from("interviews").delete().eq("id", interviewId);
-      } catch (rollbackError) {
-        console.error("Failed to roll back interview", { error: rollbackError });
-      }
+      const session = await InterviewSession.open({
+        supabase,
+        llm: llmClient,
+        userId: user.id,
+        interviewId: interview.id,
+      });
+      await session.start();
+      return { ok: true, interviewId: interview.id };
+    } catch (startError) {
+      console.error("Interview opening failed", {
+        interviewId: interview.id,
+        errorName: startError instanceof Error ? startError.name : "UnknownError",
+      });
+      await rollbackInterview(supabase, interview.id);
       return {
         ok: false,
         message:
-          "We couldn't generate the first question. Please try again.",
+          startError instanceof InterviewError
+            ? startError.message
+            : "We couldn't generate the first question. Please try again.",
       };
     }
   } catch (error) {
-    if (error instanceof AppError || error instanceof AuthError) {
+    if (error instanceof AppError || error instanceof AuthError || error instanceof InterviewError) {
       console.error("Create interview failed", { code: error.code });
       return { ok: false, message: error.message };
     }
     console.error("Create interview failed", {
       reason: error instanceof Error ? error.name : "unknown",
     });
+    if (interviewId !== null) {
+      // Nothing may survive a half-started session.
+      console.error("Rolling back half-created interview", { interviewId });
+    }
     return { ok: false, message: "We couldn't start that interview. Please try again." };
+  }
+}
+
+/** Removes a row whose opening could not be produced, so no ghost sessions linger. */
+async function rollbackInterview(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  interviewId: string,
+): Promise<void> {
+  try {
+    const { error } = await supabase.from("interviews").delete().eq("id", interviewId);
+    if (error) console.error("Failed to roll back interview", { errorCode: error.code });
+  } catch (rollbackError) {
+    console.error("Failed to roll back interview", { rollbackError });
   }
 }

@@ -1,8 +1,17 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
+import { Suspense, type ReactNode } from "react";
 import { connection } from "next/server";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CheckCircle2, Clock3, MessageSquareText, Sparkles } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Clock3,
+  MessageSquareText,
+  Sparkles,
+  Target,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -11,6 +20,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { InterviewRepository } from "@/repositories/InterviewRepository";
 import { InterviewTurnRepository } from "@/repositories/InterviewTurnRepository";
 import { InterviewHistoryService } from "@/services/InterviewHistoryService";
+import { ReportService, type StoredReport } from "@/services/interview/ReportService";
 import type { InterviewEvaluation } from "@/models/InterviewTurn";
 import { ReportSkeleton } from "./ReportSkeleton";
 
@@ -47,6 +57,16 @@ async function ReportContent({ params }: ReportPageProps) {
   const { interview, turns } = report;
   const formattedDate = formatDate(interview.createdAt);
   const isInProgress = interview.status === "in_progress";
+
+  // Generated lazily on first view of a finished interview, then served from
+  // the stored row. A session still running has nothing to summarise yet.
+  const summary = isInProgress
+    ? null
+    : await new ReportService({
+        supabase,
+        userId: user.id,
+        interviewId: id,
+      }).ensureReport();
 
   return (
     <main
@@ -112,6 +132,8 @@ async function ReportContent({ params }: ReportPageProps) {
           </Card>
         </section>
 
+        {summary && !isInProgress ? <ReportSummary report={summary} /> : null}
+
         <section aria-labelledby="turns-heading">
           <div className="mb-4 flex items-end justify-between gap-4">
             <div>
@@ -155,6 +177,133 @@ async function ReportContent({ params }: ReportPageProps) {
         </section>
       </div>
     </main>
+  );
+}
+
+function ReportSummary({ report }: { report: StoredReport }) {
+  const timeSpent = formatDuration(report.durationSeconds);
+  const categoryEntries = Object.entries(report.categoryScores);
+
+  return (
+    <section aria-labelledby="summary-heading" className="space-y-4">
+      <div>
+        <p className="text-xs font-medium uppercase tracking-[0.16em] text-accent">Your debrief</p>
+        <h2
+          id="summary-heading"
+          className="mt-1 font-display text-xl font-semibold tracking-tight text-foreground sm:text-2xl"
+        >
+          How it went
+        </h2>
+      </div>
+
+      <Card className="p-6 sm:p-8">
+        <div className="flex flex-wrap items-center gap-3">
+          <Badge variant="accent">
+            <Clock3 aria-hidden="true" className="h-3.5 w-3.5" />
+            {timeSpent} spent
+          </Badge>
+          <Badge>
+            <MessageSquareText aria-hidden="true" className="h-3.5 w-3.5" />
+            {report.questionFeedback.length} answered
+          </Badge>
+          {report.fallback ? <Badge>Automated summary</Badge> : null}
+        </div>
+
+        {report.summary ? (
+          <p className="mt-4 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground sm:text-base">
+            {report.summary}
+          </p>
+        ) : null}
+
+        {categoryEntries.length > 0 ? (
+          <dl className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {categoryEntries.map(([label, score]) => (
+              <div key={label} className="rounded-lg border border-border bg-surface px-3 py-2">
+                <dt className="text-[11px] text-muted-foreground">{label}</dt>
+                <dd className="mt-0.5 text-sm font-semibold tabular-nums text-foreground">
+                  {score}/10
+                </dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+      </Card>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        {report.strengths.length > 0 ? (
+          <SummaryList
+            icon={<TrendingUp aria-hidden="true" className="h-4 w-4" />}
+            label="Strengths"
+            items={report.strengths}
+            tone="accent"
+          />
+        ) : null}
+        {report.weaknesses.length > 0 ? (
+          <SummaryList
+            icon={<TrendingDown aria-hidden="true" className="h-4 w-4" />}
+            label="Weak areas"
+            items={report.weaknesses}
+            tone="warning"
+          />
+        ) : null}
+      </div>
+
+      {report.focusNext.length > 0 ? (
+        <SummaryList
+          icon={<Target aria-hidden="true" className="h-4 w-4" />}
+          label="Focus on next"
+          items={report.focusNext}
+          tone="accent"
+        />
+      ) : null}
+
+      {report.cvInsights.length > 0 ? (
+        <SummaryList
+          icon={<Sparkles aria-hidden="true" className="h-4 w-4" />}
+          label="CV insights"
+          items={report.cvInsights}
+          tone="muted"
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function SummaryList({
+  icon,
+  label,
+  items,
+  tone,
+}: {
+  icon: ReactNode;
+  label: string;
+  items: readonly string[];
+  tone: "accent" | "warning" | "muted";
+}) {
+  const toneClasses =
+    tone === "accent"
+      ? "border-accent/20 bg-accent/5 text-accent"
+      : tone === "warning"
+        ? "border-warning/30 bg-warning/5 text-warning"
+        : "border-border bg-surface text-muted-foreground";
+  const textClass = tone === "accent" ? "text-accent" : tone === "warning" ? "text-warning" : "text-muted-foreground";
+
+  return (
+    <Card className="min-w-0 p-5 sm:p-6">
+      <h3 className={`inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide ${textClass}`}>
+        <span className={`grid h-7 w-7 place-items-center rounded-lg border ${toneClasses}`}>
+          {icon}
+        </span>
+        {label}
+      </h3>
+      <ul className="mt-3 list-inside list-disc space-y-1.5 text-sm leading-relaxed text-muted-foreground">
+        {items.map((item, index) => (
+          <li key={`${index}-${item}`} className="break-words [overflow-wrap:anywhere]">
+            {item}
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 
@@ -304,6 +453,14 @@ function statusLabel(status: string): string {
     default:
       return status;
   }
+}
+
+function formatDuration(totalSeconds: number): string {
+  const total = Math.max(0, Math.trunc(totalSeconds));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  if (minutes === 0) return `${seconds}s`;
+  return seconds === 0 ? `${minutes} min` : `${minutes} min ${seconds}s`;
 }
 
 function formatDate(value: string): string {

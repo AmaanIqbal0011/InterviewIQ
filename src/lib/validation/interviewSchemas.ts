@@ -9,7 +9,26 @@ import { difficultyValues, experienceLevelValues } from "@/lib/validation/onboar
 export const interviewTypeValues = ["hr", "technical", "mixed"] as const;
 export type InterviewType = (typeof interviewTypeValues)[number];
 
-export const questionCountValues = ['5', '8', '10'] as const;
+/** Session length the candidate picks before the interview starts. */
+export const durationValues = ["3", "5", "10", "15"] as const;
+export type InterviewDuration = (typeof durationValues)[number];
+
+export const DURATION_MINUTES: Record<InterviewDuration, number> = {
+  "3": 3,
+  "5": 5,
+  "10": 10,
+  "15": 15,
+};
+
+export const DURATION_LABELS: Record<InterviewDuration, string> = {
+  "3": "Quick screen",
+  "5": "Standard",
+  "10": "Deep dive",
+  "15": "Full loop",
+};
+
+/** Seconds of runway the interviewer keeps for the wrap-up conversation. */
+export const WRAP_UP_SECONDS = 45;
 
 export const interviewLanguageValues = ["english", "urdu_hinglish"] as const;
 export type InterviewLanguage = (typeof interviewLanguageValues)[number];
@@ -37,9 +56,9 @@ export const interviewConfigSchema = z.object({
   experience_level: z.enum(experienceLevelValues),
   interview_type: z.enum(interviewTypeValues),
   difficulty: z.enum(difficultyValues),
-  question_count: z.enum(questionCountValues, {
-    message: "Choose 5, 8, or 10 questions.",
-  }),
+  duration_minutes: z.enum(durationValues, {
+    message: "Choose a 3, 5, 10, or 15 minute interview.",
+  }).default("5"),
   interview_language: z.enum(interviewLanguageValues),
   focus_topics: z.array(focusTopicSchema).max(MAX_FOCUS_TOPICS, `Up to ${MAX_FOCUS_TOPICS} focus topics.`),
   /** When false the frozen context snapshot excludes resume data. */
@@ -54,7 +73,7 @@ export const DEFAULT_INTERVIEW_CONFIG: InterviewConfig = {
   experience_level: "entry",
   interview_type: "mixed",
   difficulty: "medium",
-  question_count: "5",
+  duration_minutes: "5",
   interview_language: "english",
   focus_topics: [],
   use_resume: true,

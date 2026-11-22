@@ -6,6 +6,7 @@ import ChatUI from "./client";
 import { AuthGuard } from "@/guards/AuthGuard";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { interviewConfigSchema } from "@/lib/validation/interviewSchemas";
+import { InterviewTimer } from "@/services/interview/InterviewTimer";
 
 export const metadata: Metadata = {
   title: "Interview Chat",
@@ -40,7 +41,7 @@ async function ChatContent({ params }: ChatPageProps) {
 
   const { data: interview, error } = await supabase
     .from("interviews")
-    .select("user_id, status, config")
+    .select("user_id, status, config, started_at")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -50,13 +51,22 @@ async function ChatContent({ params }: ChatPageProps) {
   if (interview.status === "completed") redirect(`/interview/${encodeURIComponent(id)}/report`);
 
   const config = interviewConfigSchema.parse(interview.config);
+  const durationSeconds = InterviewTimer.durationSecondsFor(config);
+  const timer = new InterviewTimer({
+    durationSeconds,
+    startedAt: interview.started_at,
+    completed: false,
+    openingComplete: true,
+  });
 
   return (
     <ChatUI
       interviewId={id}
       targetRole={config.target_role}
       interviewType={config.interview_type}
-      questionCount={Number(config.question_count)}
+      durationSeconds={durationSeconds}
+      initialRemainingSeconds={timer.remainingSeconds}
+      initialPhase={timer.phase}
       speechLanguage={config.interview_language === "urdu_hinglish" ? "ur-PK" : "en-US"}
     />
   );

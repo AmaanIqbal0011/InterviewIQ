@@ -7,22 +7,26 @@ export type InterviewErrorCode =
   | "interview_not_found"
   | "interview_already_completed"
   | "interview_not_started"
+  | "interview_context_invalid"
   | "evaluation_failed"
   | "question_generation_failed"
   | "report_generation_failed"
   | "rate_limited"
   | "answer_too_long"
+  | "answer_already_submitted"
   | "llm_not_configured";
 
 const DEFAULT_MESSAGES: Record<InterviewErrorCode, string> = {
   interview_not_found: "We couldn't find that interview. It may have been deleted.",
   interview_already_completed: "This interview is already finished. Start a new one to keep practicing.",
   interview_not_started: "This interview hasn't started yet.",
+  interview_context_invalid: "Interview context is unavailable.",
   evaluation_failed: "We couldn't evaluate that answer just now. Please try again.",
   question_generation_failed: "We couldn't prepare the next question. Please try again.",
   report_generation_failed: "We couldn't build your report just now. Please retry.",
   rate_limited: "You're answering quickly — please wait a moment before sending another answer.",
   answer_too_long: "That answer is too long. Keep it under 3,000 characters.",
+  answer_already_submitted: "This answer was already submitted.",
   llm_not_configured: "The AI interviewer isn't configured yet. Add GEMINI_API_KEY to the server environment.",
 };
 
@@ -30,11 +34,13 @@ const STATUS_BY_CODE: Record<InterviewErrorCode, number> = {
   interview_not_found: 404,
   interview_already_completed: 409,
   interview_not_started: 409,
+  interview_context_invalid: 500,
   evaluation_failed: 502,
   question_generation_failed: 502,
   report_generation_failed: 502,
   rate_limited: 429,
   answer_too_long: 413,
+  answer_already_submitted: 409,
   llm_not_configured: 503,
 };
 

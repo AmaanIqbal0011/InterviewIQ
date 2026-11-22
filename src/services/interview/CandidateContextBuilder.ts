@@ -75,6 +75,7 @@ export class CandidateContextBuilder {
         interview_type: goal.interviewType,
         difficulty: goal.difficulty,
         interview_language: goal.interviewLanguage,
+        practice_goals: goal.practiceGoals,
         additional_notes: goal.additionalNotes,
       },
       onboarding: {
@@ -124,6 +125,7 @@ export class CandidateContextBuilder {
 /** Strips contact details: the prompt never needs email or phone. */
 function toResumeContext(resume: ParsedResume): CandidateResumeContext {
   return {
+    full_name: resume.full_name,
     summary: resume.summary,
     skills: resume.skills,
     experience: resume.experience.map((entry) => ({

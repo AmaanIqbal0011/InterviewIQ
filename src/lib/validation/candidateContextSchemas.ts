@@ -10,7 +10,7 @@ export const contextEducationSchema = z.object({
   level: z.string(),
   institution: z.string(),
   field_of_study: z.string().nullable(),
-  start_year: z.number(),
+  start_year: z.number().nullable(),
   end_year: z.number().nullable(),
   is_current: z.boolean(),
   grade: z.string().nullable(),
@@ -46,6 +46,7 @@ export const contextCareerGoalSchema = z.object({
   interview_type: z.string(),
   difficulty: z.string(),
   interview_language: z.string(),
+  practice_goals: z.array(z.string()),
   additional_notes: z.string().nullable(),
 });
 
@@ -86,6 +87,8 @@ export const contextResumeLanguageSchema = z.object({
 
 /** Resume-derived facts only — contact details (email/phone) are never sent to the LLM. */
 export const contextResumeSchema = z.object({
+  /** Name as written on the CV; null when the parser could not find one. */
+  full_name: z.string().nullable().default(null),
   summary: z.string().nullable(),
   skills: z.object({
     technical: z.array(z.string()),
