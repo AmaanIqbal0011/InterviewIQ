@@ -37,10 +37,10 @@ export class LandingContentService {
     const { routes, brand } = siteConfig;
 
     this.navLinks = [
-      new NavLink({ label: "Features", href: "#features" }),
-      new NavLink({ label: "How it works", href: "#how-it-works" }),
-      new NavLink({ label: "Report", href: "#report" }),
-      new NavLink({ label: "FAQ", href: "#faq" }),
+      new NavLink({ label: "Features", href: "/#features" }),
+      new NavLink({ label: "How it works", href: "/#how-it-works" }),
+      new NavLink({ label: "Report", href: "/#report" }),
+      new NavLink({ label: "FAQ", href: "/#faq" }),
     ];
 
     this.hero = new HeroContent({
@@ -272,18 +272,10 @@ export class LandingContentService {
         new FooterColumn({
           title: "Product",
           links: [
-            new NavLink({ label: "Features", href: "#features" }),
-            new NavLink({ label: "How it works", href: "#how-it-works" }),
-            new NavLink({ label: "Report", href: "#report" }),
-            new NavLink({ label: "FAQ", href: "#faq" }),
-          ],
-        }),
-        new FooterColumn({
-          title: "Company",
-          links: [
-            new NavLink({ label: "About", href: "#" }),
-            new NavLink({ label: "Blog", href: "#" }),
-            new NavLink({ label: "Careers", href: "#" }),
+            new NavLink({ label: "Features", href: "/#features" }),
+            new NavLink({ label: "How it works", href: "/#how-it-works" }),
+            new NavLink({ label: "Report", href: "/#report" }),
+            new NavLink({ label: "FAQ", href: "/#faq" }),
           ],
         }),
         new FooterColumn({
@@ -297,19 +289,26 @@ export class LandingContentService {
         new FooterColumn({
           title: "Legal",
           links: [
-            new NavLink({ label: "Privacy policy", href: "#" }),
-            new NavLink({ label: "Terms of service", href: "#" }),
-            new NavLink({ label: "Security", href: "#" }),
+            new NavLink({ label: "Privacy policy", href: "/privacy" }),
+            new NavLink({ label: "Terms of service", href: "/terms" }),
+            new NavLink({ label: "Security", href: "/security" }),
           ],
         }),
       ],
       socials: [
-        new SocialLink({ label: "X (Twitter)", href: "#", icon: "twitter" }),
-        new SocialLink({ label: "LinkedIn", href: "#", icon: "linkedin" }),
-        new SocialLink({ label: "GitHub", href: "#", icon: "github" }),
+        new SocialLink({
+          label: "LinkedIn",
+          href: "https://www.linkedin.com/in/amaniqbal0011",
+          icon: "linkedin",
+        }),
+        new SocialLink({
+          label: "GitHub",
+          href: "https://github.com/AmaanIqbal0011/InterviewIQ",
+          icon: "github",
+        }),
       ],
       copyright: `© ${year} ${brand.name}. All rights reserved.`,
-      closingNote: "Built for candidates who prepare with intent.",
+      closingNote: "Developed by Aman Iqbal",
     });
   }
 

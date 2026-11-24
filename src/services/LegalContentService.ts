@@ -1,7 +1,7 @@
 import { TERMS_VERSION, siteConfig } from "@/lib/siteConfig";
 
 /** Which legal document to show. */
-export type LegalDocumentKey = "terms" | "privacy";
+export type LegalDocumentKey = "terms" | "privacy" | "security";
 
 /**
  * Single source of truth for the long-form legal copy rendered inside the
@@ -13,6 +13,7 @@ export class LegalContentService {
 
   private readonly terms: string;
   private readonly privacy: string;
+  private readonly security: string;
 
   private constructor() {
     const { brand } = siteConfig;
@@ -44,6 +45,14 @@ export class LegalContentService {
       `8. Changes. We may update this policy as the product changes. Material changes bump the version number stored with your account and are brought to your attention the next time you sign up.`,
       `9. Contact. For privacy questions, contact the ${brand.name} team using the details published on our website.`,
     ].join("\n\n");
+
+    this.security = [
+      `Security at ${brand.name}`,
+      `We use industry-standard measures to help protect your data, including encrypted transport and hashed credentials. No system is perfectly secure.`,
+      `We process resumes, interview answers and reports to provide the service as described in our Privacy Policy.`,
+      `You can help protect your account by using a strong, unique password, keeping your credentials private and only uploading material you have the right to share.`,
+      `For details about the information we collect and how it is used, please read our Privacy Policy.`,
+    ].join("\n\n");
   }
 
   static getInstance(): LegalContentService {
@@ -62,11 +71,25 @@ export class LegalContentService {
   }
 
   getDocument(kind: LegalDocumentKey): string {
-    return kind === "terms" ? this.terms : this.privacy;
+    switch (kind) {
+      case "terms":
+        return this.terms;
+      case "privacy":
+        return this.privacy;
+      case "security":
+        return this.security;
+    }
   }
 
   getTitle(kind: LegalDocumentKey): string {
-    return kind === "terms" ? "Terms & Conditions" : "Privacy Policy";
+    switch (kind) {
+      case "terms":
+        return "Terms & Conditions";
+      case "privacy":
+        return "Privacy Policy";
+      case "security":
+        return "Security";
+    }
   }
 }
 
